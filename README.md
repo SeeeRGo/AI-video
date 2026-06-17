@@ -38,10 +38,13 @@ Some image-to-video models use different input names, so configure them without 
 
 ```bash
 VIDEO_PROMPT_FIELD=prompt
-VIDEO_IMAGE_FIELD=image
+VIDEO_IMAGE_FIELD=start_image
 VIDEO_DURATION_FIELD=duration
+VIDEO_ALLOWED_DURATIONS=5,10
 VIDEO_EXTRA_INPUT_JSON={"aspect_ratio":"16:9"}
 ```
+
+For `kwaivgi/kling-v2.1`, the app automatically uses `start_image` and valid durations `5,10` if you leave `VIDEO_IMAGE_FIELD` unset. Other models may require different field names.
 
 You can also use `REPLICATE_VERSION` instead of `REPLICATE_MODEL` for version-based predictions.
 

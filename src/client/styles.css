@@ -204,6 +204,7 @@ label {
 }
 
 .segmented button,
+.duration-options button,
 .secondary-button,
 .icon-button,
 .generate-button {
@@ -231,10 +232,24 @@ label {
   grid-template-columns: 1fr auto;
 }
 
-.duration-row input {
+.duration-options {
   grid-column: 1 / -1;
-  width: 100%;
-  accent-color: #2f6f68;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.duration-options button {
+  min-height: 44px;
+  color: #536174;
+  background: #f4f6f8;
+  border: 1px solid #d8dee8;
+}
+
+.duration-options button.active {
+  color: #ffffff;
+  background: #7d3f39;
+  border-color: #7d3f39;
 }
 
 .duration-value {

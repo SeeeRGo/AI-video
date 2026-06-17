@@ -15,7 +15,7 @@ export function normalizePromptInput(input = {}) {
     subject: clean(input.subject, DEFAULT_SUBJECT),
     motion: clean(input.motion, DEFAULT_MOTION),
     style: clean(input.style, DEFAULT_STYLE),
-    duration: Number.isFinite(duration) ? Math.min(10, Math.max(5, duration)) : 7
+    duration: Number.isFinite(duration) ? Math.min(10, Math.max(5, duration)) : 5
   };
 }
 

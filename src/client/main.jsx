@@ -18,7 +18,7 @@ import "./styles.css";
 
 const DEFAULT_FORM = {
   variant: "serious",
-  duration: 7,
+  duration: 5,
   subject: "",
   motion: "",
   style: ""
@@ -226,19 +226,23 @@ function App() {
             </div>
 
             <div className="control-block duration-row">
-              <label htmlFor="duration">Duration</label>
+              <label>Duration</label>
               <div className="duration-value">
                 <Clock3 size={16} />
                 <span>{form.duration}s</span>
               </div>
-              <input
-                id="duration"
-                type="range"
-                min="5"
-                max="10"
-                value={form.duration}
-                onChange={(event) => updateForm("duration", Number(event.target.value))}
-              />
+              <div className="duration-options" role="group" aria-label="Video duration">
+                {[5, 10].map((duration) => (
+                  <button
+                    key={duration}
+                    type="button"
+                    className={form.duration === duration ? "active" : ""}
+                    onClick={() => updateForm("duration", duration)}
+                  >
+                    {duration}s
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="field-grid">

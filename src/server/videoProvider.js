@@ -18,6 +18,54 @@ function parseExtraInput() {
   }
 }
 
+function parseAllowedDurations(model) {
+  const raw =
+    process.env.VIDEO_ALLOWED_DURATIONS ||
+    (model && model.toLowerCase().startsWith("kwaivgi/kling-") ? "5,10" : "");
+
+  return raw
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item > 0);
+}
+
+function closestDuration(duration, allowedDurations) {
+  if (allowedDurations.length === 0) return Number(duration);
+
+  return allowedDurations.reduce((best, candidate) => {
+    const bestDistance = Math.abs(best - duration);
+    const candidateDistance = Math.abs(candidate - duration);
+    return candidateDistance < bestDistance ? candidate : best;
+  }, allowedDurations[0]);
+}
+
+function defaultImageField(model) {
+  if (model && model.toLowerCase().startsWith("kwaivgi/kling-")) {
+    return "start_image";
+  }
+
+  return "image";
+}
+
+function resolveImageField(model) {
+  const configuredField = process.env.VIDEO_IMAGE_FIELD?.trim();
+  const isKlingModel = model && model.toLowerCase().startsWith("kwaivgi/kling-");
+
+  if (configuredField && !(isKlingModel && configuredField === "image")) {
+    return configuredField;
+  }
+
+  return defaultImageField(model);
+}
+
+function normalizeReplicateInput(input, model) {
+  const allowedDurations = parseAllowedDurations(model);
+  return {
+    ...input,
+    duration: closestDuration(Number(input.duration), allowedDurations)
+  };
+}
+
 function findVideoUrl(output) {
   if (typeof output === "string") return output;
   if (Array.isArray(output)) {
@@ -81,9 +129,10 @@ async function createReplicateJob({ file, input }) {
     throw new Error("Set either REPLICATE_MODEL or REPLICATE_VERSION for Replicate video generation.");
   }
 
-  const prompt = buildProviderPrompt(input);
+  const normalizedInput = normalizeReplicateInput(input, model);
+  const prompt = buildProviderPrompt(normalizedInput);
   const promptField = process.env.VIDEO_PROMPT_FIELD || "prompt";
-  const imageField = process.env.VIDEO_IMAGE_FIELD || "image";
+  const imageField = resolveImageField(model);
   const durationField = process.env.VIDEO_DURATION_FIELD || "duration";
 
   const providerInput = {
@@ -93,7 +142,7 @@ async function createReplicateJob({ file, input }) {
   };
 
   if (durationField) {
-    providerInput[durationField] = Number(input.duration);
+    providerInput[durationField] = normalizedInput.duration;
   }
 
   const webhook = process.env.REPLICATE_WEBHOOK_URL;
@@ -126,8 +175,8 @@ async function createReplicateJob({ file, input }) {
     id: payload.id,
     provider: "replicate",
     status: payload.status || "starting",
-    variant: input.variant,
-    duration: input.duration,
+    variant: normalizedInput.variant,
+    duration: normalizedInput.duration,
     prompt,
     output: findVideoUrl(payload.output),
     raw: payload
