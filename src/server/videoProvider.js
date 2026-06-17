@@ -109,7 +109,7 @@ async function createReplicateJob({ file, input }) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Token ${token}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(body)
@@ -142,7 +142,7 @@ async function getReplicateJob(id) {
 
   const response = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
     headers: {
-      Authorization: `Token ${token}`
+      Authorization: `Bearer ${token}`
     }
   });
 
