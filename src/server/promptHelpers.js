@@ -26,6 +26,10 @@ export function createVideoPrompts(input = {}) {
     `Animate the still photo into a ${duration}-second image-to-video clip. ` +
     `Preserve the exact identity, clothing, composition, lighting, and background from the source image. ` +
     `Use smooth temporal consistency, realistic physics, no morphing, no new objects, no text, and no cuts.`;
+  const funnyShared =
+    `Animate the still photo into a ${duration}-second vertical-friendly image-to-video clip. ` +
+    `Preserve the exact identity, clothing, main subject, lighting, and recognizable source image. ` +
+    `Use smooth temporal consistency, coherent physics, no grotesque distortion, no captions, no logos, and no watermarks.`;
 
   return {
     serious:
@@ -33,9 +37,10 @@ export function createVideoPrompts(input = {}) {
       `Use gentle camera drift, subtle parallax, controlled focus breathing, and believable environmental movement. ` +
       `The result should feel like a high-end editorial or film insert.`,
     funny:
-      `${shared} Create a ridiculous but still coherent clip where ${subject} comes to life in an absurd way: ` +
-      `micro-expressions, tiny overconfident poses, dramatic slow-motion confidence, and playful background reactions. ` +
-      `Keep the original photo recognizable, avoid grotesque distortion, and make the joke visual rather than adding text.`
+      `${funnyShared} Create a ridiculous reaction-meme style clip where ${subject} comes to life as if the joke lands in front of an unseen room. ` +
+      `Use tiny overconfident poses, smug micro-expressions, awkward dance or performance beats, sudden dramatic confidence, comedic zooms, and quick handheld reaction energy. ` +
+      `If the source image already contains bystanders, let them laugh, turn, clap, or react playfully; otherwise imply the reaction through timing, camera movement, and the subject's performance. ` +
+      `Keep the joke visual and shareable without adding text.`
   };
 }
 
