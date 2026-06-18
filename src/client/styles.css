@@ -176,6 +176,24 @@ h2 {
   white-space: nowrap;
 }
 
+.prep-toolbar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prep-toolbar button {
+  min-height: 40px;
+  color: #263241;
+  background: #f1f4f8;
+  border: 1px solid #d8dee8;
+}
+
+.prep-toolbar button:hover:not(:disabled) {
+  background: #e7edf4;
+}
+
 .controls-panel {
   display: grid;
   align-content: start;
@@ -205,6 +223,7 @@ label {
 
 .segmented button,
 .duration-options button,
+.prep-toolbar button,
 .secondary-button,
 .icon-button,
 .generate-button {
@@ -413,6 +432,10 @@ video {
   .media-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .prep-toolbar {
+    grid-template-columns: 1fr 1fr;
   }
 
   .secondary-button {
