@@ -5,6 +5,7 @@ import {
   Camera,
   Clapperboard,
   Clock3,
+  Crop as CropIcon,
   Film,
   ImagePlus,
   Loader2,
@@ -29,6 +30,14 @@ const DEFAULT_FORM = {
 };
 
 const MAX_PREPARED_EDGE = 1536;
+const MIN_TRIM_PADDING = 4;
+const MAX_TRIM_PADDING = 18;
+const DEFAULT_CROP_INSETS = {
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0
+};
 
 function statusLabel(status) {
   if (!status) return "Waiting";
@@ -85,12 +94,96 @@ function drawImageToCanvas(image, maxEdge = MAX_PREPARED_EDGE) {
   return canvas;
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((first, second) => first - second);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function percentile(values, ratio) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((first, second) => first - second);
+  return sorted[Math.floor((sorted.length - 1) * ratio)];
+}
+
+function colorDistance(red, green, blue, background) {
+  const redDelta = red - background.red;
+  const greenDelta = green - background.green;
+  const blueDelta = blue - background.blue;
+  return Math.sqrt(redDelta * redDelta + greenDelta * greenDelta + blueDelta * blueDelta);
+}
+
+function estimateBackground(data, width, height) {
+  const sampleStep = Math.max(1, Math.floor(Math.min(width, height) / 260));
+  const cornerSize = clamp(Math.round(Math.min(width, height) * 0.08), 8, 56);
+  const samples = [];
+  let transparentSamples = 0;
+  let totalSamples = 0;
+
+  function addPixel(x, y) {
+    const index = (y * width + x) * 4;
+    const alpha = data[index + 3];
+    totalSamples += 1;
+    if (alpha <= 16) {
+      transparentSamples += 1;
+      return;
+    }
+    samples.push({
+      red: data[index],
+      green: data[index + 1],
+      blue: data[index + 2]
+    });
+  }
+
+  function addCorner(xStart, xEnd, yStart, yEnd) {
+    for (let y = yStart; y < yEnd; y += sampleStep) {
+      for (let x = xStart; x < xEnd; x += sampleStep) {
+        addPixel(x, y);
+      }
+    }
+  }
+
+  addCorner(0, cornerSize, 0, cornerSize);
+  addCorner(Math.max(0, width - cornerSize), width, 0, cornerSize);
+  addCorner(0, cornerSize, Math.max(0, height - cornerSize), height);
+  addCorner(Math.max(0, width - cornerSize), width, Math.max(0, height - cornerSize), height);
+
+  for (let x = 0; x < width; x += sampleStep) {
+    addPixel(x, 0);
+    addPixel(x, height - 1);
+  }
+  for (let y = 0; y < height; y += sampleStep) {
+    addPixel(0, y);
+    addPixel(width - 1, y);
+  }
+
+  if (transparentSamples / Math.max(1, totalSamples) > 0.35) {
+    return { transparent: true, red: 255, green: 255, blue: 255, threshold: 1 };
+  }
+
+  const background = {
+    transparent: false,
+    red: median(samples.map((sample) => sample.red)),
+    green: median(samples.map((sample) => sample.green)),
+    blue: median(samples.map((sample) => sample.blue)),
+    threshold: 28
+  };
+  const edgeDistances = samples.map((sample) => colorDistance(sample.red, sample.green, sample.blue, background));
+  background.threshold = clamp(percentile(edgeDistances, 0.82) * 1.45 + 12, 22, 62);
+  return background;
+}
+
 function findTrimBounds(canvas) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   const { width, height } = canvas;
   const { data } = context.getImageData(0, 0, width, height);
-  const rowThreshold = Math.max(4, Math.floor(width * 0.005));
-  const columnThreshold = Math.max(4, Math.floor(height * 0.005));
+  const background = estimateBackground(data, width, height);
+  const rowThreshold = Math.max(3, Math.floor(width * 0.0025));
+  const columnThreshold = Math.max(3, Math.floor(height * 0.0025));
 
   function isContentAt(x, y) {
     const index = (y * width + x) * 4;
@@ -98,25 +191,50 @@ function findTrimBounds(canvas) {
     const green = data[index + 1];
     const blue = data[index + 2];
     const alpha = data[index + 3];
-    return alpha > 16 && (red < 242 || green < 242 || blue < 242) && red + green + blue < 720;
+    if (alpha <= 16) return false;
+    if (background.transparent) return true;
+
+    const luma = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+    const backgroundLuma = background.red * 0.2126 + background.green * 0.7152 + background.blue * 0.0722;
+    const maxChannelDelta = Math.max(
+      Math.abs(red - background.red),
+      Math.abs(green - background.green),
+      Math.abs(blue - background.blue)
+    );
+    return (
+      colorDistance(red, green, blue, background) > background.threshold &&
+      (maxChannelDelta > 14 || Math.abs(luma - backgroundLuma) > 14)
+    );
   }
 
-  function rowHasContent(y) {
+  function rowScore(y) {
     let count = 0;
     for (let x = 0; x < width; x += 1) {
       if (isContentAt(x, y)) count += 1;
-      if (count >= rowThreshold) return true;
     }
-    return false;
+    return count;
   }
 
-  function columnHasContent(x) {
+  function columnScore(x) {
     let count = 0;
     for (let y = 0; y < height; y += 1) {
       if (isContentAt(x, y)) count += 1;
-      if (count >= columnThreshold) return true;
     }
-    return false;
+    return count;
+  }
+
+  const rowScores = Array.from({ length: height }, (_, y) => rowScore(y));
+  const columnScores = Array.from({ length: width }, (_, x) => columnScore(x));
+
+  function hasContent(scores, index, threshold) {
+    if (scores[index] >= threshold) return true;
+    const start = Math.max(0, index - 2);
+    const end = Math.min(scores.length - 1, index + 2);
+    let rollingScore = 0;
+    for (let item = start; item <= end; item += 1) {
+      rollingScore += scores[item];
+    }
+    return rollingScore >= threshold * 3;
   }
 
   let top = 0;
@@ -124,17 +242,26 @@ function findTrimBounds(canvas) {
   let left = 0;
   let right = width - 1;
 
-  while (top < bottom && !rowHasContent(top)) top += 1;
-  while (bottom > top && !rowHasContent(bottom)) bottom -= 1;
-  while (left < right && !columnHasContent(left)) left += 1;
-  while (right > left && !columnHasContent(right)) right -= 1;
+  while (top < bottom && !hasContent(rowScores, top, rowThreshold)) top += 1;
+  while (bottom > top && !hasContent(rowScores, bottom, rowThreshold)) bottom -= 1;
+  while (left < right && !hasContent(columnScores, left, columnThreshold)) left += 1;
+  while (right > left && !hasContent(columnScores, right, columnThreshold)) right -= 1;
 
-  const padding = Math.max(8, Math.round(Math.min(width, height) * 0.015));
+  if (top === bottom || left === right) {
+    return { x: 0, y: 0, width, height };
+  }
+
+  const padding = clamp(Math.round(Math.min(width, height) * 0.008), MIN_TRIM_PADDING, MAX_TRIM_PADDING);
+  const x = Math.max(0, left - padding);
+  const y = Math.max(0, top - padding);
+  const cropRight = Math.min(width - 1, right + padding);
+  const cropBottom = Math.min(height - 1, bottom + padding);
+
   return {
-    x: Math.max(0, left - padding),
-    y: Math.max(0, top - padding),
-    width: Math.min(width, right - left + 1 + padding * 2),
-    height: Math.min(height, bottom - top + 1 + padding * 2)
+    x,
+    y,
+    width: cropRight - x + 1,
+    height: cropBottom - y + 1
   };
 }
 
@@ -158,6 +285,28 @@ async function autoTrimFile(file) {
     bounds.height
   );
   return canvasToFile(trimmedCanvas, file, "trimmed");
+}
+
+async function cropFile(file, insets) {
+  const image = await loadImage(file);
+  const sourceCanvas = drawImageToCanvas(image);
+  const left = Math.round(sourceCanvas.width * (insets.left / 100));
+  const top = Math.round(sourceCanvas.height * (insets.top / 100));
+  const right = Math.round(sourceCanvas.width * (1 - insets.right / 100));
+  const bottom = Math.round(sourceCanvas.height * (1 - insets.bottom / 100));
+  const cropWidth = right - left;
+  const cropHeight = bottom - top;
+
+  if (cropWidth < 48 || cropHeight < 48) {
+    throw new Error("Crop is too small.");
+  }
+
+  const croppedCanvas = document.createElement("canvas");
+  croppedCanvas.width = cropWidth;
+  croppedCanvas.height = cropHeight;
+  const context = croppedCanvas.getContext("2d");
+  context.drawImage(sourceCanvas, left, top, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+  return canvasToFile(croppedCanvas, file, "cropped");
 }
 
 async function rotateFile(file, degrees) {
@@ -195,6 +344,8 @@ function useObjectUrl(file) {
 function App() {
   const [photo, setPhoto] = useState(null);
   const [originalPhoto, setOriginalPhoto] = useState(null);
+  const [cropInsets, setCropInsets] = useState(DEFAULT_CROP_INSETS);
+  const [showCropControls, setShowCropControls] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [prompts, setPrompts] = useState(null);
@@ -209,6 +360,7 @@ function App() {
     if (!prompts) return "";
     return form.variant === "funny" ? prompts.funny : prompts.serious;
   }, [form.variant, prompts]);
+  const hasCropInset = Object.values(cropInsets).some((value) => value > 0);
 
   async function refreshPrompts(nextForm = form) {
     const response = await fetch("/api/prompts", {
@@ -253,8 +405,14 @@ function App() {
     if (!file) return;
     setOriginalPhoto(file);
     setPhoto(file);
+    setCropInsets(DEFAULT_CROP_INSETS);
+    setShowCropControls(false);
     setJob(null);
     setError("");
+  }
+
+  function updateCropInset(edge, value) {
+    setCropInsets((current) => ({ ...current, [edge]: Number(value) }));
   }
 
   async function preparePhoto(action) {
@@ -265,12 +423,21 @@ function App() {
     try {
       if (action === "reset") {
         setPhoto(originalPhoto);
+        setCropInsets(DEFAULT_CROP_INSETS);
+        setShowCropControls(false);
         setJob(null);
         return;
       }
 
-      const nextPhoto = action === "trim" ? await autoTrimFile(photo) : await rotateFile(photo, action);
+      const nextPhoto =
+        action === "trim"
+          ? await autoTrimFile(photo)
+          : action === "crop"
+            ? await cropFile(photo, cropInsets)
+            : await rotateFile(photo, action);
       setPhoto(nextPhoto);
+      setCropInsets(DEFAULT_CROP_INSETS);
+      if (action === "crop") setShowCropControls(false);
       setJob(null);
     } catch (err) {
       setError(err.message);
@@ -347,7 +514,27 @@ function App() {
               }}
             >
               {previewUrl ? (
-                <img src={previewUrl} alt="Uploaded preview" />
+                <div className="preview-wrap">
+                  <img src={previewUrl} alt="Uploaded preview" />
+                  {showCropControls ? (
+                    <div
+                      className="crop-overlay"
+                      style={{
+                        "--crop-top": `${cropInsets.top}%`,
+                        "--crop-right": `${cropInsets.right}%`,
+                        "--crop-bottom": `${cropInsets.bottom}%`,
+                        "--crop-left": `${cropInsets.left}%`
+                      }}
+                      aria-hidden="true"
+                    >
+                      <span className="crop-shade crop-shade-top" />
+                      <span className="crop-shade crop-shade-right" />
+                      <span className="crop-shade crop-shade-bottom" />
+                      <span className="crop-shade crop-shade-left" />
+                      <span className="crop-frame" />
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <div className="empty-upload">
                   <ImagePlus size={42} />
@@ -377,6 +564,15 @@ function App() {
                 {prepBusy ? <Loader2 size={16} className="spin" /> : <ScanLine size={16} />}
                 Auto trim
               </button>
+              <button
+                type="button"
+                className={showCropControls ? "active-tool" : ""}
+                onClick={() => setShowCropControls((current) => !current)}
+                disabled={!photo || prepBusy}
+              >
+                <CropIcon size={16} />
+                Crop
+              </button>
               <button type="button" onClick={() => preparePhoto(-90)} disabled={!photo || prepBusy}>
                 <RotateCcw size={16} />
                 Left
@@ -390,6 +586,49 @@ function App() {
                 Reset
               </button>
             </div>
+
+            {showCropControls && photo ? (
+              <div className="crop-controls">
+                {[
+                  ["top", "Top"],
+                  ["right", "Right"],
+                  ["bottom", "Bottom"],
+                  ["left", "Left"]
+                ].map(([edge, label]) => (
+                  <label key={edge}>
+                    <span>{label}</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="45"
+                      step="1"
+                      value={cropInsets[edge]}
+                      onChange={(event) => updateCropInset(edge, event.target.value)}
+                    />
+                    <strong>{cropInsets[edge]}%</strong>
+                  </label>
+                ))}
+                <div className="crop-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setCropInsets(DEFAULT_CROP_INSETS)}
+                    disabled={prepBusy || !hasCropInset}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button primary-crop"
+                    onClick={() => preparePhoto("crop")}
+                    disabled={prepBusy || !hasCropInset}
+                  >
+                    {prepBusy ? <Loader2 size={16} className="spin" /> : <CropIcon size={16} />}
+                    Apply crop
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="panel controls-panel">
